@@ -1,0 +1,2033 @@
+﻿==============================================================================
+ARCHIVO: Cachipun.csproj
+==============================================================================
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Cachipun</RootNamespace>
+    <AssemblyName>Cachipun</AssemblyName>
+    <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
+  </PropertyGroup>
+
+</Project>
+
+==============================================================================
+ARCHIVO: Program.cs
+==============================================================================
+using System;
+using System.Windows.Forms;
+
+namespace Cachipun;
+
+internal static class Program
+{
+    [STAThread]
+    private static void Main()
+    {
+        ApplicationConfiguration.Initialize();
+        Application.Run(new MainForm());
+    }
+}
+
+==============================================================================
+ARCHIVO: Jugada.cs
+==============================================================================
+using System;
+
+namespace Cachipun;
+
+/// <summary>
+/// Las tres jugadas. El orden importa: cada jugada le gana a la que va antes en la lista,
+/// y Piedra (la primera) le gana a Tijera (la última). Papel > Piedra > Tijera > Papel.
+/// </summary>
+public enum Jugada
+{
+    Piedra = 0,
+    Papel = 1,
+    Tijera = 2
+}
+
+/// <summary>Cómo terminó una ronda, mirado desde el jugador.</summary>
+public enum Resultado
+{
+    Ganaste,
+    Perdiste,
+    Empate
+}
+
+/// <summary>Los dos modos de la app: jugar contra la compu o pedir una jugada al azar.</summary>
+public enum ModoJuego
+{
+    ContraLaCompu,
+    Azar
+}
+
+/// <summary>Niveles de la compu. El número coincide con la posición en el ComboBox.</summary>
+public enum Dificultad
+{
+    Facil = 0,
+    Normal = 1,
+    Dificil = 2
+}
+
+/// <summary>
+/// Métodos de ayuda para las jugadas: nombres con su artículo correcto (la piedra, el papel,
+/// la tijera), plurales, emojis y las reglas del juego. Las frases chilenas usan esto para no
+/// decir cosas como "el piedra" o "dos papel seguidas".
+/// </summary>
+public static class JugadaExtensiones
+{
+    public static readonly Jugada[] Todas = { Jugada.Piedra, Jugada.Papel, Jugada.Tijera };
+
+    /// <summary>"piedra", "papel", "tijera" (en minúscula, para meter en frases).</summary>
+    public static string Nombre(this Jugada j)
+    {
+        switch (j)
+        {
+            case Jugada.Piedra: return "piedra";
+            case Jugada.Papel: return "papel";
+            default: return "tijera";
+        }
+    }
+
+    /// <summary>"Piedra", "Papel", "Tijera" (para títulos y botones).</summary>
+    public static string NombreTitulo(this Jugada j)
+    {
+        string n = j.Nombre();
+        return char.ToUpper(n[0]) + n.Substring(1);
+    }
+
+    /// <summary>"la" para piedra y tijera, "el" para papel.</summary>
+    public static string Articulo(this Jugada j)
+    {
+        return j == Jugada.Papel ? "el" : "la";
+    }
+
+    /// <summary>"la piedra", "el papel", "la tijera".</summary>
+    public static string ConArticulo(this Jugada j)
+    {
+        return j.Articulo() + " " + j.Nombre();
+    }
+
+    /// <summary>"piedras", "papeles", "tijeras".</summary>
+    public static string Plural(this Jugada j)
+    {
+        switch (j)
+        {
+            case Jugada.Piedra: return "piedras";
+            case Jugada.Papel: return "papeles";
+            default: return "tijeras";
+        }
+    }
+
+    /// <summary>"esa piedra", "ese papel", "esa tijera".</summary>
+    public static string Esa(this Jugada j)
+    {
+        return j == Jugada.Papel ? "ese papel" : "esa " + j.Nombre();
+    }
+
+    /// <summary>Emoji de la mano. En WinForms salen en blanco y negro y toman el color del texto.</summary>
+    public static string Emoji(this Jugada j)
+    {
+        switch (j)
+        {
+            case Jugada.Piedra: return "✊";
+            case Jugada.Papel: return "✋";
+            default: return "✌";
+        }
+    }
+
+    /// <summary>La jugada que le gana a esta (Piedra → Papel, Papel → Tijera, Tijera → Piedra).</summary>
+    public static Jugada QuienLeGana(this Jugada j)
+    {
+        return (Jugada)(((int)j + 1) % 3);
+    }
+
+    /// <summary>La jugada a la que esta le gana (Piedra → Tijera, Papel → Piedra, Tijera → Papel).</summary>
+    public static Jugada AQuienLeGana(this Jugada j)
+    {
+        return (Jugada)(((int)j + 2) % 3);
+    }
+
+    /// <summary>Resultado de tirar "tuya" contra "otra", mirado desde quien tiró "tuya".</summary>
+    public static Resultado ContraOtra(this Jugada tuya, Jugada otra)
+    {
+        if (tuya == otra) return Resultado.Empate;
+        return otra == tuya.AQuienLeGana() ? Resultado.Ganaste : Resultado.Perdiste;
+    }
+
+    /// <summary>La regla completa de la jugada ganadora, como en la web de referencia ("Papel cubre a Piedra").</summary>
+    public static string Regla(this Jugada ganadora)
+    {
+        switch (ganadora)
+        {
+            case Jugada.Piedra: return "La piedra aplasta a la tijera";
+            case Jugada.Papel: return "El papel envuelve a la piedra";
+            default: return "La tijera corta el papel";
+        }
+    }
+
+    /// <summary>Versión corta para los botones.</summary>
+    public static string ReglaCorta(this Jugada j)
+    {
+        switch (j)
+        {
+            case Jugada.Piedra: return "le gana a la tijera";
+            case Jugada.Papel: return "le gana a la piedra";
+            default: return "le gana al papel";
+        }
+    }
+}
+
+==============================================================================
+ARCHIVO: MotorCachipun.cs
+==============================================================================
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace Cachipun;
+
+/// <summary>
+/// Lleva la cuenta de la partida: victorias, derrotas, empates y rachas.
+/// Regla de la casa: un empate no suma ni corta la racha.
+/// </summary>
+public sealed class Estadisticas
+{
+    public int Victorias { get; private set; }
+    public int Derrotas { get; private set; }
+    public int Empates { get; private set; }
+
+    /// <summary>Victorias seguidas ahora mismo.</summary>
+    public int RachaActual { get; private set; }
+
+    /// <summary>La racha de victorias más larga de la sesión.</summary>
+    public int MejorRacha { get; private set; }
+
+    /// <summary>Derrotas seguidas ahora mismo.</summary>
+    public int RachaDerrotas { get; private set; }
+
+    public int EmpatesSeguidos { get; private set; }
+
+    /// <summary>Resultado de la ronda anterior (null si todavía no se juega ninguna).</summary>
+    public Resultado? Anterior { get; private set; }
+
+    /// <summary>Se pone en true cuando la última ronda batió la mejor racha (desde 3 victorias seguidas).</summary>
+    public bool BatioRecord { get; private set; }
+
+    public int Rondas
+    {
+        get { return Victorias + Derrotas + Empates; }
+    }
+
+    /// <summary>Porcentaje de rondas ganadas (0 a 100). Los empates cuentan como ronda jugada.</summary>
+    public double TasaExito
+    {
+        get { return Rondas == 0 ? 0 : Victorias * 100.0 / Rondas; }
+    }
+
+    public void Registrar(Resultado resultado)
+    {
+        BatioRecord = false;
+
+        switch (resultado)
+        {
+            case Resultado.Ganaste:
+                Victorias++;
+                RachaActual++;
+                RachaDerrotas = 0;
+                EmpatesSeguidos = 0;
+                BatioRecord = RachaActual > MejorRacha && RachaActual >= 3;
+                MejorRacha = Math.Max(MejorRacha, RachaActual);
+                break;
+
+            case Resultado.Perdiste:
+                Derrotas++;
+                RachaDerrotas++;
+                RachaActual = 0;
+                EmpatesSeguidos = 0;
+                break;
+
+            default:
+                Empates++;
+                EmpatesSeguidos++;
+                break;
+        }
+
+        Anterior = resultado;
+    }
+
+    public void Reiniciar()
+    {
+        Victorias = Derrotas = Empates = 0;
+        RachaActual = MejorRacha = RachaDerrotas = EmpatesSeguidos = 0;
+        Anterior = null;
+        BatioRecord = false;
+    }
+}
+
+/// <summary>
+/// El "cerebro" de la compu. No sabe nada de ventanas ni botones, solo de jugadas.
+///
+/// Importante: la compu decide ANTES de enterarse de tu jugada de esta ronda. Por eso
+/// <see cref="ElegirJugadaCompu"/> no recibe tu jugada, y después hay que llamar a
+/// <see cref="RegistrarJugadaDelJugador"/>. Así no hace trampa.
+/// </summary>
+public sealed class MotorCachipun
+{
+    private readonly Random azar;
+    private readonly int[] frecuencia = new int[3];              // cuántas veces has tirado cada jugada
+    private readonly int[,] transiciones = new int[3, 3];        // [jugada anterior, jugada siguiente]
+    private Jugada? ultima;
+
+    public MotorCachipun(Random? azar = null)
+    {
+        this.azar = azar ?? new Random();
+    }
+
+    public Jugada JugadaAlAzar()
+    {
+        return (Jugada)azar.Next(3);
+    }
+
+    public Jugada ElegirJugadaCompu(Dificultad nivel)
+    {
+        switch (nivel)
+        {
+            case Dificultad.Facil:
+                return JugadaAlAzar();
+
+            case Dificultad.Normal:
+                // 4 de cada 10 veces le gana a tu última jugada; el resto, al azar.
+                if (ultima is Jugada anterior && azar.NextDouble() < 0.40)
+                    return anterior.QuienLeGana();
+                return JugadaAlAzar();
+
+            default:
+                // Difícil: intenta adivinar qué vas a tirar y le gana (7 de cada 10 veces).
+                Jugada? prediccion = PredecirJugadaDelJugador();
+                if (prediccion is Jugada esperada && azar.NextDouble() < 0.70)
+                    return esperada.QuienLeGana();
+                return JugadaAlAzar();
+        }
+    }
+
+    public void RegistrarJugadaDelJugador(Jugada jugada)
+    {
+        if (ultima is Jugada anterior)
+            transiciones[(int)anterior, (int)jugada]++;
+
+        frecuencia[(int)jugada]++;
+        ultima = jugada;
+    }
+
+    public void Reiniciar()
+    {
+        Array.Clear(frecuencia, 0, frecuencia.Length);
+        Array.Clear(transiciones, 0, transiciones.Length);
+        ultima = null;
+    }
+
+    /// <summary>
+    /// Primero mira qué sueles tirar DESPUÉS de tu última jugada (por ejemplo, "después de piedra
+    /// casi siempre tira papel"). Si todavía hay pocos datos, usa la jugada que más has tirado.
+    /// </summary>
+    private Jugada? PredecirJugadaDelJugador()
+    {
+        if (ultima is Jugada anterior)
+        {
+            int[] fila =
+            {
+                transiciones[(int)anterior, 0],
+                transiciones[(int)anterior, 1],
+                transiciones[(int)anterior, 2]
+            };
+
+            if (fila.Sum() >= 3)
+                return (Jugada)IndiceMayor(fila);
+        }
+
+        if (frecuencia.Sum() >= 2)
+            return (Jugada)IndiceMayor(frecuencia);
+
+        return null;
+    }
+
+    /// <summary>Índice del valor más grande; si hay empate entre varios, elige uno al azar.</summary>
+    private int IndiceMayor(int[] valores)
+    {
+        int maximo = valores.Max();
+        var empatados = new List<int>();
+
+        for (int i = 0; i < valores.Length; i++)
+        {
+            if (valores[i] == maximo) empatados.Add(i);
+        }
+
+        return empatados[azar.Next(empatados.Count)];
+    }
+}
+
+==============================================================================
+ARCHIVO: FrasesChilenas.cs
+==============================================================================
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace Cachipun;
+
+/// <summary>
+/// Nombres de las categorías de frases. Usar estas constantes (y no strings sueltos)
+/// evita errores de tipeo.
+/// </summary>
+public static class Categoria
+{
+    // Títulos grandes del resultado
+    public const string TituloGana = "titulo.gana";
+    public const string TituloPierde = "titulo.pierde";
+    public const string TituloEmpate = "titulo.empate";
+    public const string TituloAzar = "titulo.azar";
+
+    // Comentario de la compu bajo el resultado
+    public const string DetalleGana = "detalle.gana";
+    public const string DetalleGanaRacha = "detalle.gana.racha";
+    public const string DetalleGanaVuelta = "detalle.gana.vuelta";
+    public const string DetallePierde = "detalle.pierde";
+    public const string DetallePierdeRacha = "detalle.pierde.racha";
+    public const string DetallePierdeCortaRacha = "detalle.pierde.cortaracha";
+    public const string DetalleEmpate = "detalle.empate";
+    public const string DetalleEmpateSeguido = "detalle.empate.seguido";
+    public const string DetalleAzar = "detalle.azar";
+
+    // Mensajes de la barra de abajo
+    public const string EstadoBienvenida = "estado.bienvenida";
+    public const string EstadoGana = "estado.gana";
+    public const string EstadoGanaRacha = "estado.gana.racha";
+    public const string EstadoPierde = "estado.pierde";
+    public const string EstadoPierdeRacha = "estado.pierde.racha";
+    public const string EstadoEmpate = "estado.empate";
+    public const string EstadoRepite = "estado.repite";
+    public const string EstadoRecord = "estado.record";
+    public const string EstadoReset = "estado.reset";
+    public const string EstadoModoCompu = "estado.modo.compu";
+    public const string EstadoModoAzar = "estado.modo.azar";
+    public const string EstadoAzar = "estado.azar";
+    public const string EstadoNivelFacil = "estado.nivel.facil";
+    public const string EstadoNivelNormal = "estado.nivel.normal";
+    public const string EstadoNivelDificil = "estado.nivel.dificil";
+    public const string EstadoPantallazo = "estado.pantallazo";
+}
+
+/// <summary>
+/// Banco de frases chilenas. Cada frase es una plantilla con "marcas" entre llaves que se
+/// reemplazan según las jugadas de la ronda, así el género y el plural siempre quedan bien:
+///
+///   {tu} / {Tu}          → "tu piedra" / "Tu piedra"        (tu jugada)
+///   {mi} / {Mi}          → "mi tijera" / "Mi tijera"        (jugada de la compu)
+///   {laTuya} / {LaTuya}  → "la piedra" / "el papel"         (tu jugada con artículo)
+///   {laMia} / {LaMia}    → "la tijera" / "el papel"         (jugada de la compu con artículo)
+///   {jugadaTu}           → "piedra"                         (tu jugada, sola)
+///   {jugadaMia}          → "tijera"                         (jugada de la compu, sola)
+///   {plural}             → "piedras" / "papeles" / "tijeras"
+///   {esa}                → "esa piedra" / "ese papel"
+///   {n}                  → un número (racha, repeticiones, etc.)
+///
+/// Las frases evitan adjetivos con género sobre quien juega ("cómodo", "cachado"), para que
+/// funcionen igual si juega un hombre o una mujer.
+/// </summary>
+public sealed class FrasesChilenas
+{
+    private readonly Random azar;
+    private readonly Dictionary<string, string> ultimaPorCategoria = new Dictionary<string, string>();
+
+    public FrasesChilenas(Random azar)
+    {
+        this.azar = azar;
+    }
+
+    /// <summary>Todas las plantillas (se deja público para poder revisarlas en pruebas).</summary>
+    public static IReadOnlyDictionary<string, string[]> Plantillas
+    {
+        get { return Banco; }
+    }
+
+    /// <summary>
+    /// Elige una frase de la categoría, sin repetir la misma dos veces seguidas,
+    /// y reemplaza las marcas con las jugadas indicadas.
+    /// </summary>
+    public string Elegir(string categoria, Jugada? tuya = null, Jugada? compu = null, int n = 0)
+    {
+        if (!Banco.TryGetValue(categoria, out string[]? opciones) || opciones.Length == 0)
+            return string.Empty;
+
+        string plantilla = opciones[0];
+
+        if (opciones.Length > 1)
+        {
+            ultimaPorCategoria.TryGetValue(categoria, out string? anterior);
+            string[] candidatas = anterior == null
+                ? opciones
+                : opciones.Where(o => o != anterior).ToArray();
+
+            if (candidatas.Length == 0) candidatas = opciones;
+
+            plantilla = candidatas[azar.Next(candidatas.Length)];
+            ultimaPorCategoria[categoria] = plantilla;
+        }
+
+        return Armar(plantilla, tuya, compu, n);
+    }
+
+    /// <summary>Frase especial cuando se llega a cierta cantidad de rondas (null si no toca ninguna).</summary>
+    public string? Hito(int rondas)
+    {
+        return Hitos.TryGetValue(rondas, out string? frase) ? frase : null;
+    }
+
+    public void Reiniciar()
+    {
+        ultimaPorCategoria.Clear();
+    }
+
+    private static string Armar(string plantilla, Jugada? tuya, Jugada? compu, int n)
+    {
+        string r = plantilla;
+
+        if (tuya is Jugada t)
+        {
+            r = r.Replace("{Tu}", "Tu " + t.Nombre())
+                 .Replace("{tu}", "tu " + t.Nombre())
+                 .Replace("{LaTuya}", Mayuscula(t.ConArticulo()))
+                 .Replace("{laTuya}", t.ConArticulo())
+                 .Replace("{jugadaTu}", t.Nombre())
+                 .Replace("{plural}", t.Plural())
+                 .Replace("{esa}", t.Esa());
+        }
+
+        if (compu is Jugada c)
+        {
+            r = r.Replace("{Mi}", "Mi " + c.Nombre())
+                 .Replace("{mi}", "mi " + c.Nombre())
+                 .Replace("{LaMia}", Mayuscula(c.ConArticulo()))
+                 .Replace("{laMia}", c.ConArticulo())
+                 .Replace("{jugadaMia}", c.Nombre());
+        }
+
+        return r.Replace("{n}", n.ToString());
+    }
+
+    private static string Mayuscula(string texto)
+    {
+        return char.ToUpper(texto[0]) + texto.Substring(1);
+    }
+
+    private static readonly Dictionary<int, string> Hitos = new Dictionary<int, string>
+    {
+        [10] = "¡Ya van 10 rondas! Esto se está poniendo serio, ¿cachai?",
+        [25] = "25 rondas... ¿no teníai tareas pendientes, po?",
+        [50] = "50 rondas. Ya somos casi amigos.",
+        [100] = "100 rondas. Oficialmente, leyenda del cachipún."
+    };
+
+    private static readonly Dictionary<string, string[]> Banco = new Dictionary<string, string[]>
+    {
+        // ------------------------------------------------------------------ TÍTULOS
+        [Categoria.TituloGana] = new[]
+        {
+            "¡Ganaste!",
+            "¡Punto pa' ti!",
+            "¡Esa estuvo filete!",
+            "¡Bacán, ganaste!",
+            "¡Te la mandaste!",
+            "¡Buena, esa fue tuya!"
+        },
+        [Categoria.TituloPierde] = new[]
+        {
+            "¡Perdiste!",
+            "¡Ahí te pillé!",
+            "Esta fue pa' la compu",
+            "¡Chuta, perdiste!",
+            "¡Punto pa' mí!",
+            "Se la llevó la compu"
+        },
+        [Categoria.TituloEmpate] = new[]
+        {
+            "¡Empate!",
+            "¡Quedamos a mano!",
+            "¡Pensamos lo mismo!",
+            "¡Empate, po!",
+            "¡Parejito!"
+        },
+        [Categoria.TituloAzar] = new[]
+        {
+            "¡Te tocó {laTuya}!",
+            "¡Sale {laTuya}!",
+            "¡Va {laTuya}!",
+            "¡Tírate {laTuya}!"
+        },
+
+        // ------------------------------------------------------------------ DETALLE: GANAS
+        [Categoria.DetalleGana] = new[]
+        {
+            "{Tu} le ganó a {mi}. Bien ahí, no hay na que decir.",
+            "Pucha, me pillaste: {tu} pudo con {mi}.",
+            "Esa te salió buena: {laTuya} le gana a {laMia}. Y a mí me dolió un poquito, ¿cachai?",
+            "Ya, punto pa' ti. {Tu} se impuso sobre {mi} sin drama.",
+            "Chuta, justo tiré {jugadaMia}. Se nota que cachaste por dónde iba la cosa.",
+            "Bacán: {tu} dejó a {mi} fuera de combate. Voy a tener que ponerme las pilas.",
+            "No me la esperaba: {tu} le pasó por encima a {mi}."
+        },
+        [Categoria.DetalleGanaRacha] = new[]
+        {
+            "¡Van {n} seguidas! {Tu} le ganó a {mi} y ya me tenís sudando.",
+            "Estai on fire: {n} al hilo. {Tu} le pasó por encima a {mi}.",
+            "Ya po, ¿hasta cuándo? {n} seguidas y {mi} no pudo con {tu}.",
+            "{n} victorias al hilo... Me tinca que hoy no es mi día.",
+            "Esto ya es sospechoso: {n} seguidas. ¿Me estai cachando las jugadas o qué?"
+        },
+        [Categoria.DetalleGanaVuelta] = new[]
+        {
+            "¡Ahí está la vuelta! {Tu} le ganó a {mi}. Eso es no achuncharse.",
+            "Te desquitaste: {laTuya} le gana a {laMia}.",
+            "Así me gusta: caíste y te paraste. {Tu} venció a {mi}.",
+            "Revancha cobrada: {tu} le pasó la aplanadora a {mi}."
+        },
+
+        // ------------------------------------------------------------------ DETALLE: PIERDES
+        [Categoria.DetallePierde] = new[]
+        {
+            "{Mi} le ganó a {tu}. Pucha, esta fue mía.",
+            "Ahí te pillé: tiré {jugadaMia} y tú {jugadaTu}. Mala pata.",
+            "{Mi} pudo más que {tu}. Tranqui, que es solo una ronda.",
+            "Chuta, no era esa. {Mi} le pasó por encima a {tu}.",
+            "¡Qué penca! {Mi} se llevó el punto contra {tu}.",
+            "No hay caso: {laMia} le gana a {laTuya}. Tírate otra, po."
+        },
+        [Categoria.DetallePierdeRacha] = new[]
+        {
+            "Van {n} pa' mí... Tranqui, cambia el chip y tírate otra cosa.",
+            "¿{n} seguidas? Cámbiate de jugada, que ya te caché el estilo.",
+            "Esto ya no es suerte, es estrategia, jaja. Ya, ya, no te piquís.",
+            "{n} derrotas al hilo. Respira hondo y tírate algo distinto."
+        },
+        [Categoria.DetallePierdeCortaRacha] = new[]
+        {
+            "Ahí se cortó la racha: {mi} le ganó a {tu}. Igual venías súper bien.",
+            "¡Te corté la racha! {Mi} frenó a {tu}.",
+            "Bueno, no se puede ganar siempre: {laMia} le gana a {laTuya}."
+        },
+
+        // ------------------------------------------------------------------ DETALLE: EMPATES
+        [Categoria.DetalleEmpate] = new[]
+        {
+            "Los dos tiramos {jugadaTu}. ¿Nos leímos la mente o qué?",
+            "Misma jugada: {jugadaTu}. Esto está súper parejo.",
+            "Nos copiamos: los dos tiramos {jugadaTu}. Desempate al tiro, po.",
+            "{Tu} contra {mi}: exactamente lo mismo. Nadie gana, nadie pierde.",
+            "¡Pensamos lo mismo! {LaTuya} por los dos lados.",
+            "Empate con {laTuya}. Esto se está poniendo bueno, ¿cachai?"
+        },
+        [Categoria.DetalleEmpateSeguido] = new[]
+        {
+            "{n} empates seguidos... Esto ya es telepatía.",
+            "Otra vez empate. ¿Estamos conectados o qué?",
+            "Ya van {n} empates al hilo. Alguien tiene que cambiar de jugada, po."
+        },
+
+        // ------------------------------------------------------------------ DETALLE: MODO AZAR
+        [Categoria.DetalleAzar] = new[]
+        {
+            "Si no te convence, pídeme otra, po.",
+            "Mi consejo: tírate {laTuya}. Si sale mal, no me culpís, ¿ya?",
+            "El destino habló: {laTuya}. Yo soy solo el mensajero.",
+            "Va {laTuya}. ¡Y no vale cambiar después!"
+        },
+
+        // ------------------------------------------------------------------ BARRA DE ABAJO
+        [Categoria.EstadoBienvenida] = new[]
+        {
+            "Acomódate nomás, que venimos a pasarlo chancho. ¡Ya, partamos!",
+            "Una partidita rápida, ¿ya? Escoge tu jugada y partimos.",
+            "Atajos: 1, 2 y 3 para jugar. Ahora, ¡a echarse un cachipún!"
+        },
+        [Categoria.EstadoGana] = new[]
+        {
+            "Bacán. A ver si te dura la racha.",
+            "Punto pa' ti; ya me dieron ganas de revancha.",
+            "Va bien la cosa, sigue así nomás.",
+            "Disfrútalo nomás, ¿cachai?",
+            "Se ganó el punto, ahora no te durmai."
+        },
+        [Categoria.EstadoGanaRacha] = new[]
+        {
+            "Estai imparable. ¿Quién te para?",
+            "Ya po, dame una oportunidad, que me estai dejando en vergüenza.",
+            "No te agrandís todavía... aunque lo estai haciendo súper.",
+            "Racha de {n}. Me tinca que tengo que cambiar la estrategia."
+        },
+        [Categoria.EstadoPierde] = new[]
+        {
+            "Tranqui, es una ronda nomás. ¿Revancha?",
+            "No pasa na; prueba otra jugada.",
+            "Me llevé este punto, pero la partida sigue abierta.",
+            "Ya, sacúdete y vamos de nuevo.",
+            "Así es el cachipún: hoy tú, mañana yo."
+        },
+        [Categoria.EstadoPierdeRacha] = new[]
+        {
+            "Ya, respiremos. Cambia la jugada y veamos qué pasa.",
+            "No te piquís; a veces toca remontar. ¿Otra?",
+            "Si querís un respiro, bájale el nivel a la compu ahí a la derecha.",
+            "Ponte las pilas, que todavía se puede dar vuelta."
+        },
+        [Categoria.EstadoEmpate] = new[]
+        {
+            "Ya, otra más; esta ronda no cuenta pa' ninguno.",
+            "Estamos leyendo la misma mente, parece.",
+            "Ni pa' ti ni pa' mí. La próxima sí que sí.",
+            "Seguimos igualados, queda harto juego."
+        },
+        [Categoria.EstadoRepite] = new[]
+        {
+            "Van {n} {plural} seguidas... ya te estoy cachando el estilo 👀",
+            "Otra vez {laTuya}. ¿Es tu jugada favorita o me estai tendiendo una trampa?",
+            "Te gusta {laTuya}, ¿ah? Voy a tener que andar con ojo.",
+            "{n} {plural} al hilo. ¿Y si probamos con otra cosa?"
+        },
+        [Categoria.EstadoRecord] = new[]
+        {
+            "¡Nueva mejor racha: {n}! Anótalo en la pizarra.",
+            "¡Récord! {n} seguidas, tu mejor racha hasta ahora.",
+            "¡{n} al hilo! Nunca habías llegado tan lejos."
+        },
+        [Categoria.EstadoReset] = new[]
+        {
+            "Partida nueva, po. ¡Ya, aperra sin miedo!",
+            "Todo en cero. Borrón y cuenta nueva.",
+            "Partimos de cero. Esta vez gano yo... o tú, ¿quién sabe?"
+        },
+        [Categoria.EstadoModoCompu] = new[]
+        {
+            "Modo compu: yo juego y tú tirái. ¡A ver quién manda!",
+            "Contra la compu otra vez. ¡Ya, aperra!"
+        },
+        [Categoria.EstadoModoAzar] = new[]
+        {
+            "Modo azar: yo te digo qué tirar y tú lo tirái nomás.",
+            "Modo azar: confía en el destino... o en mí."
+        },
+        [Categoria.EstadoAzar] = new[]
+        {
+            "Cuando querís otra, aprieta el botón de nuevo.",
+            "Anda con confianza, que el azar no se equivoca... ¿o sí?",
+            "Tírala nomás: la suerte ya está echada."
+        },
+        [Categoria.EstadoNivelFacil] = new[]
+        {
+            "Nivel fácil: tiro lo primero que se me ocurra. Relax.",
+            "Modo fácil: ni yo sé qué voy a tirar."
+        },
+        [Categoria.EstadoNivelNormal] = new[]
+        {
+            "Nivel normal: ojo que me voy a fijar en tu última jugada.",
+            "Normal: ya empiezo a mirarte de reojo."
+        },
+        [Categoria.EstadoNivelDificil] = new[]
+        {
+            "Nivel difícil: ya te estoy cachando los hábitos. Ahora sí que sí.",
+            "Difícil: me aprendo tus mañas... y no las suelto."
+        },
+        [Categoria.EstadoPantallazo] = new[]
+        {
+            "¡Listoco! Pantallazo guardado en el Escritorio, carpeta PantallazosCachipun.",
+            "Pantallazo listo, en el Escritorio. Ahora a presumir con los amigos."
+        }
+    };
+}
+
+==============================================================================
+ARCHIVO: Controles.cs
+==============================================================================
+using System;
+using System.Drawing;
+using System.Windows.Forms;
+
+namespace Cachipun;
+
+/// <summary>Colores de la app, todos en un solo lugar para cambiarlos fácil.</summary>
+internal static class Tema
+{
+    public static readonly Color Fondo = Color.FromArgb(247, 248, 252);
+    public static readonly Color FondoTarjeta = Color.White;
+    public static readonly Color FondoDuelo = Color.FromArgb(248, 247, 255);
+    public static readonly Color FondoFicha = Color.FromArgb(249, 250, 253);
+    public static readonly Color FondoRacha = Color.FromArgb(255, 247, 226);
+    public static readonly Color Neutro = Color.FromArgb(245, 246, 250);
+    public static readonly Color Borde = Color.FromArgb(226, 228, 238);
+    public static readonly Color Tinta = Color.FromArgb(39, 43, 61);
+    public static readonly Color Suave = Color.FromArgb(112, 119, 139);
+    public static readonly Color Morado = Color.FromArgb(112, 86, 235);
+    public static readonly Color MoradoClaro = Color.FromArgb(241, 237, 255);
+    public static readonly Color Verde = Color.FromArgb(44, 154, 95);
+    public static readonly Color Rojo = Color.FromArgb(219, 77, 91);
+    public static readonly Color Dorado = Color.FromArgb(194, 139, 28);
+
+    /// <summary>Mezcla dos colores: t = 0 devuelve "a", t = 1 devuelve "b".</summary>
+    public static Color Mezclar(Color a, Color b, double t)
+    {
+        t = Math.Max(0, Math.Min(1, t));
+        return Color.FromArgb(
+            (int)(a.R + (b.R - a.R) * t),
+            (int)(a.G + (b.G - a.G) * t),
+            (int)(a.B + (b.B - a.B) * t));
+    }
+}
+
+/// <summary>
+/// Panel blanco con borde fino y un poco de espacio interior: la "tarjeta" que usa toda la interfaz.
+/// Se estira solo para llenar la celda donde se pone.
+/// </summary>
+internal sealed class Tarjeta : Panel
+{
+    public Tarjeta()
+    {
+        DoubleBuffered = true;
+        ResizeRedraw = true;
+        BackColor = Tema.FondoTarjeta;
+        Padding = new Padding(16, 12, 16, 12);
+        Margin = new Padding(0);
+        Dock = DockStyle.Fill;
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        using (var lapiz = new Pen(Tema.Borde))
+        {
+            e.Graphics.DrawRectangle(lapiz, 0, 0, Width - 1, Height - 1);
+        }
+    }
+}
+
+/// <summary>Un renglón del historial: el texto y el color con que se dibuja.</summary>
+internal sealed class RegistroHistorial
+{
+    public RegistroHistorial(string texto, Color color)
+    {
+        Texto = texto;
+        Color = color;
+    }
+
+    public string Texto { get; }
+    public Color Color { get; }
+
+    public override string ToString()
+    {
+        return Texto;
+    }
+}
+
+==============================================================================
+ARCHIVO: MainForm.cs
+==============================================================================
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Windows.Forms;
+
+namespace Cachipun;
+
+/// <summary>
+/// Ventana principal. Aquí solo hay interfaz y "pegamento": la lógica del juego vive en
+/// MotorCachipun / Estadisticas y las frases en FrasesChilenas.
+///
+/// La interfaz está armada con TableLayoutPanel y Dock (nada de posiciones fijas en pixeles
+/// dentro de las tarjetas), así los botones no se cortan al cambiar el tamaño de la ventana.
+/// </summary>
+public sealed class MainForm : Form
+{
+    // ------------------------------------------------------------------ lógica
+    private readonly Random azar = new Random();
+    private readonly MotorCachipun motor;
+    private readonly FrasesChilenas frases;
+    private readonly Estadisticas estadisticas = new Estadisticas();
+
+    // ------------------------------------------------------------------ estado de la partida
+    private bool jugando;                 // true mientras corre la cuenta regresiva
+    private Jugada jugadaPendiente;       // la jugada elegida (o sorteada) que se revela al final de la cuenta
+    private int pasoCuenta;
+    private Jugada? ultimaTuya;
+    private int repeticiones;             // cuántas veces seguidas has tirado la misma jugada
+    private int tiradasAzar;
+    private int pasoDestello;
+    private Color colorDestello;
+
+    private const int PasosDestello = 12;
+    private static readonly string[] PalabrasCuenta = { "¡Ca…", "chi…", "¡PÚN!" };
+
+    // ------------------------------------------------------------------ controles
+    private readonly Label lblCaptionTu = new Label();
+    private readonly Label lblCaptionCompu = new Label();
+    private readonly Label lblIconoTu = new Label();
+    private readonly Label lblIconoCompu = new Label();
+    private readonly Label lblNombreTu = new Label();
+    private readonly Label lblNombreCompu = new Label();
+    private readonly Label lblIndicacion = new Label();
+
+    private readonly Label lblTitulo = new Label();
+    private readonly Label lblRegla = new Label();
+    private readonly Label lblDetalle = new Label();
+    private readonly Panel panelResultado = new Panel();
+    private readonly Panel acentoResultado = new Panel();
+    private TableLayoutPanel contenidoResultado = null!;
+
+    private readonly Label lblVictorias = new Label();
+    private readonly Label lblDerrotas = new Label();
+    private readonly Label lblEmpates = new Label();
+    private readonly Label lblRacha = new Label();
+    private readonly Label lblMejorRacha = new Label();
+    private readonly Label lblTasa = new Label();
+    private readonly Label lblRonda = new Label();
+
+    private readonly RadioButton rbCompu = new RadioButton();
+    private readonly RadioButton rbAzar = new RadioButton();
+    private readonly Button btnPiedra = new Button();
+    private readonly Button btnPapel = new Button();
+    private readonly Button btnTijera = new Button();
+    private readonly Button btnAzar = new Button();
+    private TableLayoutPanel panelJugadas = null!;
+    private readonly Panel panelAzar = new Panel();
+
+    private readonly ComboBox cmbNivel = new ComboBox();
+    private readonly CheckBox chkComentar = new CheckBox();
+    private readonly CheckBox chkCuenta = new CheckBox();
+    private readonly Button btnReiniciar = new Button();
+    private readonly ListBox lstHistorial = new ListBox();
+
+    private readonly Label lblEstado = new Label();
+    private readonly Button btnPantallazo = new Button();
+    private readonly ToolTip pistas = new ToolTip { AutoPopDelay = 5000, InitialDelay = 350, ReshowDelay = 150 };
+
+    // Los dos tamaños del emoji: en la cuenta regresiva el puño "late" (chico, grande, chico...).
+    private readonly Font fuenteIcono = new Font("Segoe UI Emoji", 30F);
+    private readonly Font fuenteIconoChica = new Font("Segoe UI Emoji", 22F);
+
+    private readonly System.Windows.Forms.Timer timerCuenta = new System.Windows.Forms.Timer { Interval = 380 };
+    private readonly System.Windows.Forms.Timer timerDestello = new System.Windows.Forms.Timer { Interval = 30 };
+
+    // ==================================================================== arranque
+
+    public MainForm()
+    {
+        motor = new MotorCachipun(azar);
+        frases = new FrasesChilenas(azar);
+
+        Text = "Cachipún — ¡échate una partida!";
+        StartPosition = FormStartPosition.CenterScreen;
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        Font = new Font("Segoe UI", 10F);
+        ClientSize = new Size(1140, 724);
+        MinimumSize = new Size(900, 560);
+        BackColor = Tema.Fondo;
+        ForeColor = Tema.Tinta;
+        DoubleBuffered = true;
+        KeyPreview = true;
+
+        ConstruirInterfaz();
+        MostrarPanelInicial();
+        ActualizarEstadisticas();
+
+        timerCuenta.Tick += AlTickCuenta;
+        timerDestello.Tick += AlTickDestello;
+        KeyDown += AlPresionarTecla;
+        FormClosed += (_, _) =>
+        {
+            timerCuenta.Stop();
+            timerDestello.Stop();
+            timerCuenta.Dispose();
+            timerDestello.Dispose();
+            fuenteIcono.Dispose();
+            fuenteIconoChica.Dispose();
+        };
+    }
+
+    // ==================================================================== construcción de la interfaz
+
+    private void ConstruirInterfaz()
+    {
+        SuspendLayout();
+
+        var raiz = Rejilla(1, 3, Tema.Fondo);
+        raiz.Padding = new Padding(20, 10, 20, 6);
+        Col(raiz, SizeType.Percent, 100);
+        Fila(raiz, SizeType.Absolute, 68);
+        Fila(raiz, SizeType.Percent, 100);
+        Fila(raiz, SizeType.Absolute, 30);
+        raiz.Controls.Add(ConstruirEncabezado(), 0, 0);
+        raiz.Controls.Add(ConstruirCuerpo(), 0, 1);
+        raiz.Controls.Add(ConstruirPie(), 0, 2);
+        Controls.Add(raiz);
+
+        ResumeLayout(false);
+        PerformLayout();
+    }
+
+    private Control ConstruirEncabezado()
+    {
+        var cab = Rejilla(3, 1, Tema.Fondo);
+        Col(cab, SizeType.Absolute, 66);
+        Col(cab, SizeType.Percent, 100);
+        Col(cab, SizeType.Absolute, 200);
+        Fila(cab, SizeType.Percent, 100);
+
+        var logo = new Label
+        {
+            Text = "✊",
+            Font = new Font("Segoe UI Emoji", 22F),
+            ForeColor = Tema.Morado,
+            BackColor = Tema.MoradoClaro,
+            TextAlign = ContentAlignment.MiddleCenter,
+            AutoSize = false,
+            Size = new Size(54, 54),
+            Anchor = AnchorStyles.Left,
+            Margin = Padding.Empty
+        };
+        cab.Controls.Add(logo, 0, 0);
+
+        var textos = Rejilla(1, 2, Tema.Fondo);
+        Col(textos, SizeType.Percent, 100);
+        Fila(textos, SizeType.Absolute, 38);
+        Fila(textos, SizeType.Percent, 100);
+        textos.Controls.Add(Etiqueta("Cachipún", 21, FontStyle.Bold, Tema.Tinta), 0, 0);
+        textos.Controls.Add(
+            Etiqueta("Una partidita como en el recreo. ¿O vai a arrancar apenas te gane? 😏",
+                     9.5f, FontStyle.Regular, Tema.Suave, ContentAlignment.TopLeft), 0, 1);
+        cab.Controls.Add(textos, 1, 0);
+
+        var chip = new Label
+        {
+            Text = "●  ¡YA, PARTAMOS!",
+            Font = new Font("Segoe UI", 8.5F, FontStyle.Bold),
+            ForeColor = Tema.Verde,
+            BackColor = Color.FromArgb(231, 247, 238),
+            TextAlign = ContentAlignment.MiddleCenter,
+            AutoSize = false,
+            Size = new Size(180, 32),
+            Anchor = AnchorStyles.Right,
+            Margin = Padding.Empty
+        };
+        cab.Controls.Add(chip, 2, 0);
+        return cab;
+    }
+
+    private Control ConstruirCuerpo()
+    {
+        // Si la ventana queda más chica que este tamaño mínimo, aparecen barras de desplazamiento
+        // en vez de cortar los controles.
+        var scroll = new Panel
+        {
+            Dock = DockStyle.Fill,
+            AutoScroll = true,
+            AutoScrollMinSize = new Size(900, 610),
+            BackColor = Tema.Fondo,
+            Margin = Padding.Empty
+        };
+
+        var cuerpo = Rejilla(2, 1, Tema.Fondo);
+        Col(cuerpo, SizeType.Percent, 68);
+        Col(cuerpo, SizeType.Percent, 32);
+        Fila(cuerpo, SizeType.Percent, 100);
+        cuerpo.Controls.Add(ConstruirColumnaJuego(), 0, 0);
+        cuerpo.Controls.Add(ConstruirColumnaLateral(), 1, 0);
+
+        scroll.Controls.Add(cuerpo);
+        return scroll;
+    }
+
+    // ------------------------------------------------------------------ columna izquierda: juego + estadísticas
+
+    private Control ConstruirColumnaJuego()
+    {
+        var col = Rejilla(1, 2, Tema.Fondo);
+        col.Margin = new Padding(0, 0, 14, 0);
+        Col(col, SizeType.Percent, 100);
+        Fila(col, SizeType.Percent, 100);
+        Fila(col, SizeType.Absolute, 132);
+        col.Controls.Add(ConstruirTarjetaJuego(), 0, 0);
+        col.Controls.Add(ConstruirTarjetaEstadisticas(), 0, 1);
+        return col;
+    }
+
+    private Control ConstruirTarjetaJuego()
+    {
+        var tarjeta = new Tarjeta { Margin = new Padding(0, 0, 0, 12) };
+
+        var f = Rejilla(1, 6, Tema.FondoTarjeta);
+        Col(f, SizeType.Percent, 100);
+        Fila(f, SizeType.Absolute, 58);      // título
+        Fila(f, SizeType.Absolute, 44);      // selector de modo
+        Fila(f, SizeType.Percent, 100);      // duelo (se estira)
+        Fila(f, SizeType.Absolute, 108);     // resultado
+        Fila(f, SizeType.Absolute, 22);      // indicación
+        Fila(f, SizeType.Absolute, 92);      // botones
+
+        var titulo = Rejilla(1, 2, Tema.FondoTarjeta);
+        Col(titulo, SizeType.Percent, 100);
+        Fila(titulo, SizeType.Absolute, 32);
+        Fila(titulo, SizeType.Percent, 100);
+        titulo.Controls.Add(Etiqueta("¡Ya po, no te achunchís! ¿Qué vai a tirar?", 15, FontStyle.Bold, Tema.Tinta), 0, 0);
+        titulo.Controls.Add(
+            Etiqueta("Escoge nomás. Después no vale decir que fue suerte 😄",
+                     9.5f, FontStyle.Regular, Tema.Suave, ContentAlignment.TopLeft), 0, 1);
+        f.Controls.Add(titulo, 0, 0);
+
+        f.Controls.Add(ConstruirSelectorDeModo(), 0, 1);
+        f.Controls.Add(ConstruirDuelo(), 0, 2);
+        f.Controls.Add(ConstruirResultado(), 0, 3);
+
+        Estilizar(lblIndicacion, 8.5f, FontStyle.Bold, Tema.Suave, ContentAlignment.BottomLeft);
+        lblIndicacion.Text = "¿QUÉ TIRAI?";
+        f.Controls.Add(lblIndicacion, 0, 4);
+
+        f.Controls.Add(ConstruirJugadas(), 0, 5);
+
+        tarjeta.Controls.Add(f);
+        return tarjeta;
+    }
+
+    private Control ConstruirSelectorDeModo()
+    {
+        var modo = Rejilla(2, 1, Tema.FondoTarjeta);
+        Col(modo, SizeType.Percent, 50);
+        Col(modo, SizeType.Percent, 50);
+        Fila(modo, SizeType.Percent, 100);
+
+        PrepararBotonDeModo(rbCompu, "🎮  Jugar contra la compu", new Padding(0, 4, 5, 4));
+        PrepararBotonDeModo(rbAzar, "🎲  Tírame una jugada al azar", new Padding(5, 4, 0, 4));
+        modo.Controls.Add(rbCompu, 0, 0);
+        modo.Controls.Add(rbAzar, 1, 0);
+
+        rbCompu.Checked = true;
+        rbCompu.FlatAppearance.BorderColor = Tema.Morado;
+
+        // Con escuchar a rbAzar basta: cada vez que cambia el modo, rbAzar cambia (se marca o se desmarca).
+        rbAzar.CheckedChanged += (_, _) => AlCambiarModo();
+        return modo;
+    }
+
+    private void PrepararBotonDeModo(RadioButton rb, string texto, Padding margen)
+    {
+        rb.Appearance = Appearance.Button;
+        rb.Text = texto;
+        rb.Dock = DockStyle.Fill;
+        rb.Margin = margen;
+        rb.TextAlign = ContentAlignment.MiddleCenter;
+        rb.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
+        rb.ForeColor = Tema.Tinta;
+        rb.BackColor = Color.White;
+        rb.FlatStyle = FlatStyle.Flat;
+        rb.FlatAppearance.BorderColor = Tema.Borde;
+        rb.FlatAppearance.CheckedBackColor = Tema.MoradoClaro;
+        rb.FlatAppearance.MouseOverBackColor = Tema.MoradoClaro;
+        rb.Cursor = Cursors.Hand;
+        rb.UseVisualStyleBackColor = false;
+        rb.CheckedChanged += (_, _) =>
+            rb.FlatAppearance.BorderColor = rb.Checked ? Tema.Morado : Tema.Borde;
+    }
+
+    private Control ConstruirDuelo()
+    {
+        var duelo = Rejilla(3, 1, Tema.FondoDuelo);
+        duelo.Margin = new Padding(0, 4, 0, 4);
+        Col(duelo, SizeType.Percent, 42);
+        Col(duelo, SizeType.Percent, 16);
+        Col(duelo, SizeType.Percent, 42);
+        Fila(duelo, SizeType.Percent, 100);
+
+        duelo.Controls.Add(LadoDelDuelo(lblCaptionTu, lblIconoTu, lblNombreTu, "TÚ"), 0, 0);
+        duelo.Controls.Add(Etiqueta("VS", 13, FontStyle.Bold, Tema.Morado, ContentAlignment.MiddleCenter), 1, 0);
+        duelo.Controls.Add(LadoDelDuelo(lblCaptionCompu, lblIconoCompu, lblNombreCompu, "LA COMPU"), 2, 0);
+        return duelo;
+    }
+
+    private Control LadoDelDuelo(Label caption, Label icono, Label nombre, string textoCaption)
+    {
+        var lado = Rejilla(1, 3, Tema.FondoDuelo);
+        Col(lado, SizeType.Percent, 100);
+        Fila(lado, SizeType.Absolute, 24);
+        Fila(lado, SizeType.Percent, 100);
+        Fila(lado, SizeType.Absolute, 28);
+
+        Estilizar(caption, 8.5f, FontStyle.Bold, Tema.Suave, ContentAlignment.MiddleCenter);
+        caption.Text = textoCaption;
+        Estilizar(icono, 30f, FontStyle.Regular, Tema.Morado, ContentAlignment.MiddleCenter, "Segoe UI Emoji");
+        icono.Font = fuenteIcono;
+        Estilizar(nombre, 10f, FontStyle.Bold, Tema.Tinta, ContentAlignment.MiddleCenter);
+
+        lado.Controls.Add(caption, 0, 0);
+        lado.Controls.Add(icono, 0, 1);
+        lado.Controls.Add(nombre, 0, 2);
+        return lado;
+    }
+
+    private Control ConstruirResultado()
+    {
+        panelResultado.Dock = DockStyle.Fill;
+        panelResultado.BackColor = Tema.Neutro;
+        panelResultado.Margin = new Padding(0, 6, 0, 6);
+
+        contenidoResultado = Rejilla(1, 3, Tema.Neutro);
+        Col(contenidoResultado, SizeType.Percent, 100);
+        Fila(contenidoResultado, SizeType.Absolute, 36);
+        Fila(contenidoResultado, SizeType.Absolute, 22);
+        Fila(contenidoResultado, SizeType.Percent, 100);
+
+        Estilizar(lblTitulo, 16f, FontStyle.Bold, Tema.Tinta, ContentAlignment.MiddleCenter);
+        Estilizar(lblRegla, 9.5f, FontStyle.Bold, Tema.Morado, ContentAlignment.MiddleCenter);
+        Estilizar(lblDetalle, 9.5f, FontStyle.Regular, Tema.Suave, ContentAlignment.TopCenter);
+        contenidoResultado.Controls.Add(lblTitulo, 0, 0);
+        contenidoResultado.Controls.Add(lblRegla, 0, 1);
+        contenidoResultado.Controls.Add(lblDetalle, 0, 2);
+
+        acentoResultado.Dock = DockStyle.Left;
+        acentoResultado.Width = 6;
+        acentoResultado.BackColor = Tema.Morado;
+
+        // Primero el que llena (Fill) y después el de la orilla (Left), así el orden de "dock" queda bien.
+        panelResultado.Controls.Add(contenidoResultado);
+        panelResultado.Controls.Add(acentoResultado);
+        return panelResultado;
+    }
+
+    private Control ConstruirJugadas()
+    {
+        var contenedor = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Tema.FondoTarjeta,
+            Margin = Padding.Empty
+        };
+
+        // Modo "contra la compu": los tres botones.
+        panelJugadas = Rejilla(3, 1, Tema.FondoTarjeta);
+        for (int i = 0; i < 3; i++) Col(panelJugadas, SizeType.Percent, 33.333f);
+        Fila(panelJugadas, SizeType.Percent, 100);
+        PrepararBotonDeJugada(btnPiedra, Jugada.Piedra);
+        PrepararBotonDeJugada(btnPapel, Jugada.Papel);
+        PrepararBotonDeJugada(btnTijera, Jugada.Tijera);
+        panelJugadas.Controls.Add(btnPiedra, 0, 0);
+        panelJugadas.Controls.Add(btnPapel, 1, 0);
+        panelJugadas.Controls.Add(btnTijera, 2, 0);
+
+        // Modo "al azar": un solo botón grande.
+        panelAzar.Dock = DockStyle.Fill;
+        panelAzar.BackColor = Tema.FondoTarjeta;
+        panelAzar.Margin = Padding.Empty;
+        panelAzar.Visible = false;
+
+        btnAzar.Text = "🎲  ¡Tírame una jugada!";
+        btnAzar.Dock = DockStyle.Fill;
+        btnAzar.Margin = new Padding(4);
+        btnAzar.Font = new Font("Segoe UI", 13F, FontStyle.Bold);
+        btnAzar.BackColor = Tema.MoradoClaro;
+        btnAzar.ForeColor = Tema.Morado;
+        btnAzar.FlatStyle = FlatStyle.Flat;
+        btnAzar.FlatAppearance.BorderColor = Color.FromArgb(190, 178, 255);
+        btnAzar.FlatAppearance.MouseOverBackColor = Color.FromArgb(230, 223, 255);
+        btnAzar.FlatAppearance.MouseDownBackColor = Color.FromArgb(215, 206, 255);
+        btnAzar.Cursor = Cursors.Hand;
+        btnAzar.UseVisualStyleBackColor = false;
+        btnAzar.Click += (_, _) => PedirJugadaAlAzar();
+        pistas.SetToolTip(btnAzar, "La compu sortea una jugada por ti (no cuenta para las estadísticas).");
+        panelAzar.Controls.Add(btnAzar);
+
+        contenedor.Controls.Add(panelJugadas);
+        contenedor.Controls.Add(panelAzar);
+        return contenedor;
+    }
+
+    private void PrepararBotonDeJugada(Button b, Jugada jugada)
+    {
+        b.Dock = DockStyle.Fill;
+        b.Margin = new Padding(4);
+        b.Text = jugada.Emoji() + "  " + jugada.NombreTitulo() + "\n" + jugada.ReglaCorta();
+        b.TextAlign = ContentAlignment.MiddleCenter;
+        b.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
+        b.BackColor = Color.White;
+        b.ForeColor = Tema.Tinta;
+        b.FlatStyle = FlatStyle.Flat;
+        b.FlatAppearance.BorderColor = Tema.Borde;
+        b.FlatAppearance.MouseOverBackColor = Tema.MoradoClaro;
+        b.FlatAppearance.MouseDownBackColor = Color.FromArgb(224, 217, 255);
+        b.Cursor = Cursors.Hand;
+        b.UseVisualStyleBackColor = false;
+        b.Click += (_, _) => Tirar(jugada);
+
+        int atajo = (int)jugada + 1;
+        pistas.SetToolTip(b, jugada.NombreTitulo() + " (tecla " + atajo + "): " + jugada.ReglaCorta() + ".");
+    }
+
+    private Control ConstruirTarjetaEstadisticas()
+    {
+        var tarjeta = new Tarjeta();
+
+        var f = Rejilla(1, 2, Tema.FondoTarjeta);
+        Col(f, SizeType.Percent, 100);
+        Fila(f, SizeType.Absolute, 28);
+        Fila(f, SizeType.Percent, 100);
+
+        var cabecera = Rejilla(2, 1, Tema.FondoTarjeta);
+        Col(cabecera, SizeType.Percent, 100);
+        Col(cabecera, SizeType.Absolute, 130);
+        Fila(cabecera, SizeType.Percent, 100);
+        cabecera.Controls.Add(Etiqueta("Así vamos, po", 13, FontStyle.Bold, Tema.Tinta), 0, 0);
+        Estilizar(lblRonda, 9.5f, FontStyle.Bold, Tema.Morado, ContentAlignment.MiddleRight);
+        cabecera.Controls.Add(lblRonda, 1, 0);
+        f.Controls.Add(cabecera, 0, 0);
+
+        var fichas = Rejilla(6, 1, Tema.FondoTarjeta);
+        for (int i = 0; i < 6; i++) Col(fichas, SizeType.Percent, 100f / 6f);
+        Fila(fichas, SizeType.Percent, 100);
+        fichas.Controls.Add(Ficha("VICTORIAS", lblVictorias, Tema.Verde, Tema.FondoFicha, false), 0, 0);
+        fichas.Controls.Add(Ficha("DERROTAS", lblDerrotas, Tema.Rojo, Tema.FondoFicha, false), 1, 0);
+        fichas.Controls.Add(Ficha("EMPATES", lblEmpates, Tema.Dorado, Tema.FondoFicha, false), 2, 0);
+        fichas.Controls.Add(Ficha("RACHA ACTUAL", lblRacha, Tema.Dorado, Tema.FondoRacha, false), 3, 0);
+        fichas.Controls.Add(Ficha("MEJOR RACHA", lblMejorRacha, Tema.Dorado, Tema.FondoRacha, false), 4, 0);
+        fichas.Controls.Add(Ficha("TASA DE ÉXITO", lblTasa, Tema.Morado, Tema.FondoFicha, true), 5, 0);
+        f.Controls.Add(fichas, 0, 1);
+
+        tarjeta.Controls.Add(f);
+        return tarjeta;
+    }
+
+    private Control Ficha(string titulo, Label valor, Color colorValor, Color fondo, bool ultima)
+    {
+        var ficha = Rejilla(1, 2, fondo);
+        ficha.Margin = new Padding(0, 0, ultima ? 0 : 8, 0);
+        Col(ficha, SizeType.Percent, 100);
+        Fila(ficha, SizeType.Absolute, 24);
+        Fila(ficha, SizeType.Percent, 100);
+
+        ficha.Controls.Add(Etiqueta(titulo, 7.5f, FontStyle.Bold, Tema.Suave, ContentAlignment.BottomCenter), 0, 0);
+        Estilizar(valor, 20f, FontStyle.Bold, colorValor, ContentAlignment.MiddleCenter);
+        valor.Text = "0";
+        ficha.Controls.Add(valor, 0, 1);
+        return ficha;
+    }
+
+    // ------------------------------------------------------------------ columna derecha: ajustes + historial
+
+    private Control ConstruirColumnaLateral()
+    {
+        var col = Rejilla(1, 2, Tema.Fondo);
+        Col(col, SizeType.Percent, 100);
+        Fila(col, SizeType.Absolute, 336);
+        Fila(col, SizeType.Percent, 100);
+        col.Controls.Add(ConstruirTarjetaAjustes(), 0, 0);
+        col.Controls.Add(ConstruirTarjetaHistorial(), 0, 1);
+        return col;
+    }
+
+    private Control ConstruirTarjetaAjustes()
+    {
+        var tarjeta = new Tarjeta { Margin = new Padding(0, 0, 0, 12) };
+
+        var f = Rejilla(1, 7, Tema.FondoTarjeta);
+        Col(f, SizeType.Percent, 100);
+        Fila(f, SizeType.Absolute, 30);     // título
+        Fila(f, SizeType.Absolute, 22);     // "nivel de la compu"
+        Fila(f, SizeType.Absolute, 36);     // combo
+        Fila(f, SizeType.Absolute, 30);     // check comentar
+        Fila(f, SizeType.Absolute, 30);     // check cuenta regresiva
+        Fila(f, SizeType.Absolute, 44);     // botón partir de nuevo
+        Fila(f, SizeType.Percent, 100);     // reglas
+
+        f.Controls.Add(Etiqueta("Arma tu partida", 13, FontStyle.Bold, Tema.Tinta), 0, 0);
+        f.Controls.Add(Etiqueta("NIVEL DE LA COMPU", 8.5f, FontStyle.Bold, Tema.Suave, ContentAlignment.BottomLeft), 0, 1);
+
+        cmbNivel.DropDownStyle = ComboBoxStyle.DropDownList;
+        cmbNivel.Items.AddRange(new object[]
+        {
+            "Fácil (tira cualquier cosa)",
+            "Normal (mira tu última jugada)",
+            "Difícil (te tiene cachao)"
+        });
+        cmbNivel.SelectedIndex = 0;
+        cmbNivel.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        cmbNivel.Margin = new Padding(0, 2, 0, 2);
+        cmbNivel.BackColor = Color.White;
+        cmbNivel.ForeColor = Tema.Tinta;
+        cmbNivel.SelectedIndexChanged += (_, _) => AlCambiarNivel();
+        f.Controls.Add(cmbNivel, 0, 2);
+
+        PrepararCasilla(chkComentar, "Que la compu comente cada jugada");
+        PrepararCasilla(chkCuenta, "Cuenta regresiva ¡Ca-chi-pún!");
+        f.Controls.Add(chkComentar, 0, 3);
+        f.Controls.Add(chkCuenta, 0, 4);
+
+        btnReiniciar.Text = "↻  Partir de nuevo";
+        btnReiniciar.Dock = DockStyle.Fill;
+        btnReiniciar.Margin = new Padding(0, 6, 0, 2);
+        btnReiniciar.Font = new Font("Segoe UI", 9.5F, FontStyle.Bold);
+        btnReiniciar.BackColor = Color.FromArgb(245, 243, 255);
+        btnReiniciar.ForeColor = Tema.Morado;
+        btnReiniciar.FlatStyle = FlatStyle.Flat;
+        btnReiniciar.FlatAppearance.BorderColor = Color.FromArgb(224, 217, 255);
+        btnReiniciar.Cursor = Cursors.Hand;
+        btnReiniciar.UseVisualStyleBackColor = false;
+        btnReiniciar.Click += (_, _) => PartirDeNuevo();
+        pistas.SetToolTip(btnReiniciar, "Deja todo en cero (atajo: Ctrl+N).");
+        f.Controls.Add(btnReiniciar, 0, 5);
+
+        var reglas = Etiqueta(
+            "La piedra aplasta a la tijera.\n" +
+            "El papel envuelve a la piedra.\n" +
+            "La tijera corta el papel.\n\n" +
+            "¿Tiran lo mismo? Empate, po: no suma ni resta, ni te corta la racha.",
+            9f, FontStyle.Regular, Tema.Suave, ContentAlignment.TopLeft);
+        reglas.Margin = new Padding(0, 8, 0, 0);
+        f.Controls.Add(reglas, 0, 6);
+
+        tarjeta.Controls.Add(f);
+        return tarjeta;
+    }
+
+    private static void PrepararCasilla(CheckBox casilla, string texto)
+    {
+        casilla.Text = texto;
+        casilla.Checked = true;
+        casilla.AutoSize = false;
+        casilla.Dock = DockStyle.Fill;
+        casilla.Margin = Padding.Empty;
+        casilla.Font = new Font("Segoe UI", 9.5F);
+        casilla.ForeColor = Tema.Tinta;
+        casilla.BackColor = Color.Transparent;
+    }
+
+    private Control ConstruirTarjetaHistorial()
+    {
+        var tarjeta = new Tarjeta();
+
+        var f = Rejilla(1, 2, Tema.FondoTarjeta);
+        Col(f, SizeType.Percent, 100);
+        Fila(f, SizeType.Absolute, 30);
+        Fila(f, SizeType.Percent, 100);
+        f.Controls.Add(Etiqueta("Las últimas jugadas", 13, FontStyle.Bold, Tema.Tinta), 0, 0);
+
+        lstHistorial.Dock = DockStyle.Fill;
+        lstHistorial.Margin = Padding.Empty;
+        lstHistorial.BorderStyle = BorderStyle.None;
+        lstHistorial.BackColor = Color.FromArgb(250, 250, 253);
+        lstHistorial.Font = new Font("Segoe UI", 9F);
+        lstHistorial.IntegralHeight = false;
+        lstHistorial.SelectionMode = SelectionMode.None;
+        lstHistorial.DrawMode = DrawMode.OwnerDrawFixed;
+        lstHistorial.ItemHeight = lstHistorial.Font.Height + 8;
+        lstHistorial.DrawItem += DibujarRenglonDelHistorial;
+        f.Controls.Add(lstHistorial, 0, 1);
+
+        tarjeta.Controls.Add(f);
+        return tarjeta;
+    }
+
+    private Control ConstruirPie()
+    {
+        var pie = Rejilla(2, 1, Tema.Fondo);
+        Col(pie, SizeType.Percent, 100);
+        Col(pie, SizeType.Absolute, 230);
+        Fila(pie, SizeType.Percent, 100);
+
+        Estilizar(lblEstado, 9.5f, FontStyle.Regular, Tema.Suave, ContentAlignment.MiddleLeft);
+        lblEstado.Text = frases.Elegir(Categoria.EstadoBienvenida);
+        pie.Controls.Add(lblEstado, 0, 0);
+
+        btnPantallazo.Text = "📷  Sacar pantallazo (Ctrl+S)";
+        btnPantallazo.Dock = DockStyle.Fill;
+        btnPantallazo.Margin = new Padding(0, 2, 0, 2);
+        btnPantallazo.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+        btnPantallazo.BackColor = Color.White;
+        btnPantallazo.ForeColor = Tema.Morado;
+        btnPantallazo.FlatStyle = FlatStyle.Flat;
+        btnPantallazo.FlatAppearance.BorderColor = Tema.Borde;
+        btnPantallazo.Cursor = Cursors.Hand;
+        btnPantallazo.UseVisualStyleBackColor = false;
+        btnPantallazo.Click += (_, _) => SacarPantallazo();
+        pie.Controls.Add(btnPantallazo, 1, 0);
+        return pie;
+    }
+
+    // ------------------------------------------------------------------ ayudas para armar controles
+
+    private static TableLayoutPanel Rejilla(int columnas, int filas, Color fondo)
+    {
+        return new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = columnas,
+            RowCount = filas,
+            BackColor = fondo,
+            Margin = Padding.Empty
+        };
+    }
+
+    private static void Col(TableLayoutPanel t, SizeType tipo, float valor)
+    {
+        t.ColumnStyles.Add(new ColumnStyle(tipo, valor));
+    }
+
+    private static void Fila(TableLayoutPanel t, SizeType tipo, float valor)
+    {
+        t.RowStyles.Add(new RowStyle(tipo, valor));
+    }
+
+    private static Label Estilizar(Label l, float tamano, FontStyle estilo, Color color,
+                                   ContentAlignment alineacion = ContentAlignment.MiddleLeft,
+                                   string fuente = "Segoe UI")
+    {
+        l.AutoSize = false;
+        l.Dock = DockStyle.Fill;
+        l.Margin = Padding.Empty;
+        l.Font = new Font(fuente, tamano, estilo);
+        l.ForeColor = color;
+        l.BackColor = Color.Transparent;
+        l.TextAlign = alineacion;
+        return l;
+    }
+
+    private static Label Etiqueta(string texto, float tamano, FontStyle estilo, Color color,
+                                  ContentAlignment alineacion = ContentAlignment.MiddleLeft)
+    {
+        Label l = Estilizar(new Label(), tamano, estilo, color, alineacion);
+        l.Text = texto;
+        return l;
+    }
+
+    // ==================================================================== jugar
+
+    private Dificultad NivelActual()
+    {
+        int i = cmbNivel.SelectedIndex;
+        return i < 0 ? Dificultad.Facil : (Dificultad)i;
+    }
+
+    private bool ModoAzar
+    {
+        get { return rbAzar.Checked; }
+    }
+
+    private void Tirar(Jugada tuya)
+    {
+        if (jugando || ModoAzar) return;
+
+        jugadaPendiente = tuya;
+        Bloquear(true);
+        ComenzarCuentaORevelar();
+    }
+
+    private void PedirJugadaAlAzar()
+    {
+        if (jugando || !ModoAzar) return;
+
+        jugadaPendiente = motor.JugadaAlAzar();
+        Bloquear(true);
+        ComenzarCuentaORevelar();
+    }
+
+    private void ComenzarCuentaORevelar()
+    {
+        if (chkCuenta.Checked)
+        {
+            pasoCuenta = 0;
+            MostrarPasoDeLaCuenta();
+            timerCuenta.Start();
+        }
+        else
+        {
+            Revelar();
+        }
+    }
+
+    private void AlTickCuenta(object? sender, EventArgs e)
+    {
+        pasoCuenta++;
+
+        if (pasoCuenta >= PalabrasCuenta.Length)
+        {
+            timerCuenta.Stop();
+            Revelar();
+            return;
+        }
+
+        MostrarPasoDeLaCuenta();
+    }
+
+    /// <summary>"¡Ca…" "chi…" "¡PÚN!": los puños suben y bajan (o giran los emojis, en modo azar).</summary>
+    private void MostrarPasoDeLaCuenta()
+    {
+        lblTitulo.Text = PalabrasCuenta[pasoCuenta];
+        lblTitulo.ForeColor = Tema.Morado;
+        lblRegla.Text = string.Empty;
+        lblDetalle.Text = string.Empty;
+        acentoResultado.BackColor = Tema.Morado;
+        contenidoResultado.BackColor = Tema.Neutro;
+
+        if (ModoAzar)
+        {
+            lblIconoTu.Text = JugadaExtensiones.Todas[azar.Next(3)].Emoji();
+            lblIconoCompu.Text = "🎲";
+        }
+        else
+        {
+            lblIconoTu.Text = Jugada.Piedra.Emoji();
+            lblIconoCompu.Text = Jugada.Piedra.Emoji();
+        }
+
+        lblNombreTu.Text = "…";
+        lblNombreCompu.Text = "…";
+
+        // El puño "late": chico en "¡Ca…" y "¡PÚN!", grande en "chi…".
+        Font fuente = pasoCuenta % 2 == 0 ? fuenteIconoChica : fuenteIcono;
+        lblIconoTu.Font = fuente;
+        lblIconoCompu.Font = fuente;
+    }
+
+    private void Revelar()
+    {
+        lblIconoTu.Font = fuenteIcono;
+        lblIconoCompu.Font = fuenteIcono;
+
+        if (ModoAzar)
+            RevelarJugadaAlAzar();
+        else
+            RevelarRondaContraLaCompu();
+
+        Bloquear(false);
+    }
+
+    private void RevelarRondaContraLaCompu()
+    {
+        Jugada tuya = jugadaPendiente;
+        Resultado? anterior = estadisticas.Anterior;
+
+        // La compu decide ANTES de registrar tu jugada de esta ronda: así no hace trampa.
+        Jugada compu = motor.ElegirJugadaCompu(NivelActual());
+        motor.RegistrarJugadaDelJugador(tuya);
+
+        Resultado resultado = tuya.ContraOtra(compu);
+        estadisticas.Registrar(resultado);
+
+        repeticiones = ultimaTuya == tuya ? repeticiones + 1 : 1;
+        ultimaTuya = tuya;
+
+        lblIconoTu.Text = tuya.Emoji();
+        lblIconoCompu.Text = compu.Emoji();
+        lblNombreTu.Text = tuya.NombreTitulo();
+        lblNombreCompu.Text = compu.NombreTitulo();
+
+        Color color = Tema.Suave;
+        string titulo = string.Empty;
+        string regla = string.Empty;
+        string detalle = string.Empty;
+        string estado = string.Empty;
+        int racha = estadisticas.RachaActual;
+
+        switch (resultado)
+        {
+            case Resultado.Ganaste:
+                color = Tema.Verde;
+                titulo = frases.Elegir(Categoria.TituloGana);
+                regla = tuya.Regla();
+                if (racha >= 3)
+                {
+                    detalle = frases.Elegir(Categoria.DetalleGanaRacha, tuya, compu, racha);
+                    estado = frases.Elegir(Categoria.EstadoGanaRacha, tuya, compu, racha);
+                }
+                else
+                {
+                    detalle = anterior == Resultado.Perdiste
+                        ? frases.Elegir(Categoria.DetalleGanaVuelta, tuya, compu)
+                        : frases.Elegir(Categoria.DetalleGana, tuya, compu);
+                    estado = frases.Elegir(Categoria.EstadoGana);
+                }
+                break;
+
+            case Resultado.Perdiste:
+                color = Tema.Rojo;
+                titulo = frases.Elegir(Categoria.TituloPierde);
+                regla = compu.Regla();
+                if (estadisticas.RachaDerrotas >= 3)
+                {
+                    detalle = frases.Elegir(Categoria.DetallePierdeRacha, tuya, compu, estadisticas.RachaDerrotas);
+                    estado = frases.Elegir(Categoria.EstadoPierdeRacha);
+                }
+                else
+                {
+                    detalle = anterior == Resultado.Ganaste
+                        ? frases.Elegir(Categoria.DetallePierdeCortaRacha, tuya, compu)
+                        : frases.Elegir(Categoria.DetallePierde, tuya, compu);
+                    estado = frases.Elegir(Categoria.EstadoPierde);
+                }
+                break;
+
+            default:
+                color = Tema.Dorado;
+                titulo = frases.Elegir(Categoria.TituloEmpate);
+                regla = "Los dos tiramos " + tuya.Nombre();
+                detalle = estadisticas.EmpatesSeguidos >= 2
+                    ? frases.Elegir(Categoria.DetalleEmpateSeguido, tuya, compu, estadisticas.EmpatesSeguidos)
+                    : frases.Elegir(Categoria.DetalleEmpate, tuya, compu);
+                estado = frases.Elegir(Categoria.EstadoEmpate);
+                break;
+        }
+
+        // Mensajes especiales para la barra de abajo: récord > hito de rondas > "repites mucho la misma".
+        if (estadisticas.BatioRecord)
+        {
+            estado = frases.Elegir(Categoria.EstadoRecord, n: estadisticas.MejorRacha);
+        }
+        else
+        {
+            string? hito = frases.Hito(estadisticas.Rondas);
+            if (hito != null)
+                estado = hito;
+            else if (repeticiones >= 2 && azar.NextDouble() < 0.40)
+                estado = frases.Elegir(Categoria.EstadoRepite, tuya, compu, repeticiones);
+        }
+
+        MostrarResultado(titulo, regla, detalle, color);
+        SetEstado(estado, color);
+        AgregarAlHistorial(
+            estadisticas.Rondas.ToString("00") + "  " + tuya.NombreTitulo() + " vs " + compu.NombreTitulo() + "  ·  " + resultado,
+            color);
+        ActualizarEstadisticas();
+    }
+
+    private void RevelarJugadaAlAzar()
+    {
+        Jugada sugerida = jugadaPendiente;
+        tiradasAzar++;
+
+        lblIconoTu.Text = sugerida.Emoji();
+        lblNombreTu.Text = sugerida.NombreTitulo();
+        lblIconoCompu.Text = "🎲";
+        lblNombreCompu.Text = "Sin rival, solo suerte";
+
+        MostrarResultado(
+            frases.Elegir(Categoria.TituloAzar, sugerida),
+            "Jugada al azar n.º " + tiradasAzar,
+            frases.Elegir(Categoria.DetalleAzar, sugerida),
+            Tema.Morado);
+
+        SetEstado(frases.Elegir(Categoria.EstadoAzar), Tema.Suave);
+        AgregarAlHistorial("Az  " + sugerida.NombreTitulo() + "  ·  al azar", Tema.Suave);
+    }
+
+    private void MostrarResultado(string titulo, string regla, string detalle, Color color)
+    {
+        lblTitulo.Text = titulo;
+        lblTitulo.ForeColor = color;
+        lblRegla.Text = regla;
+        lblDetalle.Text = chkComentar.Checked ? detalle : string.Empty;
+        acentoResultado.BackColor = color;
+        IniciarDestello(color);
+    }
+
+    private void Bloquear(bool bloquear)
+    {
+        jugando = bloquear;
+        btnPiedra.Enabled = !bloquear;
+        btnPapel.Enabled = !bloquear;
+        btnTijera.Enabled = !bloquear;
+        btnAzar.Enabled = !bloquear;
+        rbCompu.Enabled = !bloquear;
+        rbAzar.Enabled = !bloquear;
+        btnReiniciar.Enabled = !bloquear;
+    }
+
+    // ==================================================================== animación del resultado
+
+    /// <summary>El panel del resultado parte con un tinte del color del resultado y se va aclarando.</summary>
+    private void IniciarDestello(Color color)
+    {
+        colorDestello = Tema.Mezclar(color, Color.White, 0.80);
+        pasoDestello = 0;
+        contenidoResultado.BackColor = colorDestello;
+        timerDestello.Stop();
+        timerDestello.Start();
+    }
+
+    private void AlTickDestello(object? sender, EventArgs e)
+    {
+        pasoDestello++;
+
+        if (pasoDestello >= PasosDestello)
+        {
+            timerDestello.Stop();
+            contenidoResultado.BackColor = Tema.Neutro;
+            return;
+        }
+
+        contenidoResultado.BackColor = Tema.Mezclar(colorDestello, Tema.Neutro, pasoDestello / (double)PasosDestello);
+    }
+
+    // ==================================================================== estadísticas, historial y mensajes
+
+    private void ActualizarEstadisticas()
+    {
+        lblVictorias.Text = estadisticas.Victorias.ToString();
+        lblDerrotas.Text = estadisticas.Derrotas.ToString();
+        lblEmpates.Text = estadisticas.Empates.ToString();
+        lblRacha.Text = estadisticas.RachaActual.ToString();
+        lblMejorRacha.Text = estadisticas.MejorRacha.ToString();
+        lblTasa.Text = estadisticas.TasaExito.ToString("0.0") + "%";
+        lblRonda.Text = "Ronda " + estadisticas.Rondas;
+    }
+
+    private void AgregarAlHistorial(string texto, Color color)
+    {
+        lstHistorial.Items.Insert(0, new RegistroHistorial(texto, color));
+
+        while (lstHistorial.Items.Count > 30)
+            lstHistorial.Items.RemoveAt(lstHistorial.Items.Count - 1);
+    }
+
+    private void DibujarRenglonDelHistorial(object? sender, DrawItemEventArgs e)
+    {
+        if (e.Index < 0) return;
+
+        e.DrawBackground();
+
+        if (lstHistorial.Items[e.Index] is RegistroHistorial registro)
+        {
+            TextRenderer.DrawText(
+                e.Graphics,
+                registro.Texto,
+                lstHistorial.Font,
+                e.Bounds,
+                registro.Color,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
+    }
+
+    private void SetEstado(string texto, Color color)
+    {
+        lblEstado.Text = texto;
+        lblEstado.ForeColor = color;
+    }
+
+    private void MostrarPanelInicial()
+    {
+        bool azarActivo = ModoAzar;
+
+        lblIconoTu.Text = "❔";
+        lblNombreTu.Text = azarActivo ? "Tu jugada del día" : "Aún no tirai nada";
+        lblIconoCompu.Text = azarActivo ? "🎲" : "🤖";
+        lblNombreCompu.Text = azarActivo ? "Sin rival, solo suerte" : "Esperando tu jugada";
+        lblCaptionCompu.Text = azarActivo ? "EL AZAR" : "LA COMPU";
+        lblIndicacion.Text = azarActivo ? "¿NO SABÍ QUÉ TIRAR?" : "¿QUÉ TIRAI?";
+
+        lblTitulo.Text = "¡Ya, a jugar!";
+        lblTitulo.ForeColor = Tema.Tinta;
+        lblRegla.Text = azarActivo ? "Aprieta el botón y la compu sortea por ti" : "Piedra, papel o tijera… ¡cachipún!";
+        lblDetalle.Text = azarActivo
+            ? "No cuenta para las estadísticas: es solo para sacarte de un apuro."
+            : "Escoge una jugada abajo (o aprieta 1, 2 o 3) y vemos quién manda.";
+        acentoResultado.BackColor = Tema.Morado;
+        contenidoResultado.BackColor = Tema.Neutro;
+    }
+
+    // ==================================================================== ajustes, atajos y pantallazo
+
+    private void AlCambiarModo()
+    {
+        if (jugando) return;
+
+        panelJugadas.Visible = !ModoAzar;
+        panelAzar.Visible = ModoAzar;
+        cmbNivel.Enabled = !ModoAzar;
+
+        MostrarPanelInicial();
+        SetEstado(frases.Elegir(ModoAzar ? Categoria.EstadoModoAzar : Categoria.EstadoModoCompu), Tema.Suave);
+    }
+
+    private void AlCambiarNivel()
+    {
+        string categoria;
+        switch (NivelActual())
+        {
+            case Dificultad.Facil: categoria = Categoria.EstadoNivelFacil; break;
+            case Dificultad.Normal: categoria = Categoria.EstadoNivelNormal; break;
+            default: categoria = Categoria.EstadoNivelDificil; break;
+        }
+
+        SetEstado(frases.Elegir(categoria), Tema.Suave);
+    }
+
+    private void PartirDeNuevo()
+    {
+        if (jugando) return;
+
+        estadisticas.Reiniciar();
+        motor.Reiniciar();
+        frases.Reiniciar();
+        ultimaTuya = null;
+        repeticiones = 0;
+        tiradasAzar = 0;
+
+        timerDestello.Stop();
+        lstHistorial.Items.Clear();
+        MostrarPanelInicial();
+        ActualizarEstadisticas();
+        SetEstado(frases.Elegir(Categoria.EstadoReset), Tema.Suave);
+    }
+
+    private void AlPresionarTecla(object? sender, KeyEventArgs e)
+    {
+        if (e.Control && e.KeyCode == Keys.S)
+        {
+            SacarPantallazo();
+            e.SuppressKeyPress = true;
+            return;
+        }
+
+        if (e.Control && e.KeyCode == Keys.N)
+        {
+            PartirDeNuevo();
+            e.SuppressKeyPress = true;
+            return;
+        }
+
+        if (e.Control || e.Alt || ModoAzar) return;
+
+        if (e.KeyCode == Keys.D1 || e.KeyCode == Keys.NumPad1) Tirar(Jugada.Piedra);
+        else if (e.KeyCode == Keys.D2 || e.KeyCode == Keys.NumPad2) Tirar(Jugada.Papel);
+        else if (e.KeyCode == Keys.D3 || e.KeyCode == Keys.NumPad3) Tirar(Jugada.Tijera);
+        else return;
+
+        e.SuppressKeyPress = true;
+    }
+
+    /// <summary>
+    /// Guarda en PNG lo que se ve en la ventana. Se usa CopyFromScreen (y no DrawToBitmap) para que
+    /// salga igual que en pantalla, sin la barra de título cortando el borde de abajo.
+    /// </summary>
+    private void SacarPantallazo()
+    {
+        try
+        {
+            string carpeta = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                "PantallazosCachipun");
+            Directory.CreateDirectory(carpeta);
+
+            string archivo = Path.Combine(carpeta, "cachipun_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".png");
+            Point origen = PointToScreen(Point.Empty);
+
+            using (var imagen = new Bitmap(ClientSize.Width, ClientSize.Height))
+            {
+                using (var g = Graphics.FromImage(imagen))
+                {
+                    g.CopyFromScreen(origen, Point.Empty, ClientSize);
+                }
+
+                imagen.Save(archivo, System.Drawing.Imaging.ImageFormat.Png);
+            }
+
+            SetEstado(frases.Elegir(Categoria.EstadoPantallazo), Tema.Verde);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                "Pucha, no pude guardar el pantallazo: " + ex.Message,
+                "Pantallazo",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+    }
+}
+
+==============================================================================
+ARCHIVO: README.md
+==============================================================================
+# Cachipún — Windows Forms (versión 2)
+
+Juego de piedra, papel o tijera (el cachipún de toda la vida) en **C# con Windows Forms** y **.NET 8**, para Windows.
+La compu habla en chileno, lleva estadísticas de la sesión y tiene tres niveles de dificultad.
+
+## Qué trae
+
+- **Dos modos de juego**
+  - *Jugar contra la compu*: eliges Piedra, Papel o Tijera y ves el resultado de la batalla (TÚ vs LA COMPU).
+  - *Tírame una jugada al azar*: la compu sortea una jugada por ti (no cuenta para las estadísticas).
+- **Cuenta regresiva «¡Ca… chi… PÚN!»** antes de revelar la jugada (se puede desactivar).
+- **Tres niveles de la compu**
+  - *Fácil*: tira cualquier cosa.
+  - *Normal*: 4 de cada 10 veces le gana a tu última jugada.
+  - *Difícil*: aprende qué sueles tirar después de cada jugada y trata de adivinar la siguiente.
+  - En todos los niveles la compu decide **antes** de enterarse de tu jugada, así que no hace trampa.
+- **Resultado con la regla**: «La piedra aplasta a la tijera», «El papel envuelve a la piedra», «La tijera corta el papel».
+- **Estadísticas de la sesión**: victorias, derrotas, empates, racha actual, mejor racha y tasa de éxito.
+  Un empate no suma ni corta la racha.
+- **Historial** de las últimas 30 jugadas, con colores.
+- **Más de 110 frases chilenas** (en 29 categorías) que cambian según lo que pasó: racha de victorias, vuelta después de perder,
+  derrotas seguidas, empates seguidos, si repites mucho la misma jugada, nuevo récord, hitos de 10/25/50/100 rondas, etc.
+  Nunca repite la misma frase dos veces seguidas y el género y el plural siempre quedan bien («la piedra», «el papel», «dos tijeras»).
+- **Pantallazo** de la ventana en PNG, guardado en el Escritorio, carpeta `PantallazosCachipun`.
+
+## Atajos
+
+| Tecla | Qué hace |
+|---|---|
+| `1` / `2` / `3` | Piedra / Papel / Tijera |
+| `Ctrl+S` | Sacar pantallazo |
+| `Ctrl+N` | Partir de nuevo |
+
+## Cómo abrirlo
+
+1. Descomprime el ZIP.
+2. Abre `Cachipun.csproj` en **Visual Studio 2022** (con la carga de trabajo *Desarrollo de escritorio con .NET*).
+3. Aprieta **F5**.
+
+También se puede correr desde una terminal, en la carpeta del proyecto: `dotnet run` (requiere el SDK de .NET 8 en Windows).
+
+## Archivos
+
+| Archivo | Contenido |
+|---|---|
+| `Program.cs` | Punto de entrada. |
+| `Jugada.cs` | Enums (`Jugada`, `Resultado`, `ModoJuego`, `Dificultad`) y reglas del juego, con artículos y plurales correctos. |
+| `MotorCachipun.cs` | `Estadisticas` (conteos y rachas) y `MotorCachipun` (la IA de la compu). |
+| `FrasesChilenas.cs` | Banco de frases con marcas como `{tu}`, `{laMia}`, `{plural}`. |
+| `Controles.cs` | Colores (`Tema`), la tarjeta blanca (`Tarjeta`) y el renglón del historial. |
+| `MainForm.cs` | Interfaz y flujo del juego. |
+
+La lógica (jugadas, IA, estadísticas, frases) no depende de Windows Forms, así que se puede probar por separado.
+
+## Cómo agregar frases
+
+Abre `FrasesChilenas.cs`, busca la categoría y agrega una línea. Las marcas disponibles:
+
+| Marca | Resultado de ejemplo |
+|---|---|
+| `{tu}` / `{Tu}` | tu piedra / Tu piedra |
+| `{mi}` / `{Mi}` | mi tijera / Mi tijera (la jugada de la compu) |
+| `{laTuya}` / `{LaTuya}` | la piedra / el papel |
+| `{laMia}` / `{LaMia}` | la tijera / el papel (compu) |
+| `{jugadaTu}` / `{jugadaMia}` | piedra / tijera (sola, sin artículo) |
+| `{plural}` | piedras / papeles / tijeras |
+| `{esa}` | esa piedra / ese papel |
+| `{n}` | un número (racha, repeticiones…) |
+
+## Notas
+
+- Los emojis en Windows Forms se dibujan en blanco y negro con el color del texto (es una limitación de WinForms); por eso van pintados de morado.
+- Si la ventana se hace más chica que el tamaño mínimo, aparecen barras de desplazamiento en vez de cortar los botones.
